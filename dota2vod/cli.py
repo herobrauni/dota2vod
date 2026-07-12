@@ -116,9 +116,10 @@ def render_text(source: Source, segs: list[Segment]) -> str:
     if not segs:
         lines.append("No games detected.")
     for i, seg in enumerate(segs, 1):
-        lines.append(
-            f"Game {i}  {hms(seg.start)} - {hms(seg.end)}  ({hms(seg.duration)})  {seg.label()}"
-        )
+        line = f"Game {i}  {hms(seg.start)} - {hms(seg.end)}  ({hms(seg.duration)})"
+        if seg.label():
+            line += f"  {seg.label()}"
+        lines.append(line)
         link = source.timestamp_url(seg.start)
         if link:
             lines.append(f"        {link}")
@@ -128,7 +129,8 @@ def render_text(source: Source, segs: list[Segment]) -> str:
 def render_chapters(source: Source, segs: list[Segment]) -> str:
     lines = ["0:00 Stream start"]
     for i, seg in enumerate(segs, 1):
-        lines.append(f"{hms(seg.start)} Game {i} - {seg.label()}")
+        label = f" - {seg.label()}" if seg.label() else ""
+        lines.append(f"{hms(seg.start)} Game {i}{label}")
     return "\n".join(lines)
 
 
