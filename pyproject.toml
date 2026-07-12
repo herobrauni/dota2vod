@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dota2vod"
+version = "0.1.0"
+description = "Find Dota 2 games in full broadcast VODs (YouTube/Twitch) and emit labeled timestamps"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "yt-dlp>=2024.10.0",
+    "Pillow>=10.0",
+]
+
+[project.scripts]
+dota2vod = "dota2vod.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["dota2vod*"]
+
+[tool.pytest.ini_options]
+markers = ["e2e: slow end-to-end tests that encode a synthetic video"]
