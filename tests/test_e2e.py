@@ -14,8 +14,8 @@ import pytest
 
 from dota2vod import cli, probe
 
-GAME1 = (100, 350, "LIQUID  14  32:07  21  SPIRIT")
-GAME2 = (450, 650, "FALCONS  5  12:44  9  TUNDRA")
+GAME1 = (100, 350, "LIQUID", "14", "32:07", "21", "SPIRIT")
+GAME2 = (450, 650, "FALCONS", "5", "12:44", "9", "TUNDRA")
 
 
 @pytest.fixture(scope="module")
@@ -27,15 +27,31 @@ def synthetic_vod(tmp_path_factory):
         pytest.skip("no truetype font for drawtext")
     path = tmp_path_factory.mktemp("vod") / "stream.mp4"
 
-    def hud(start, end, text):
+    def hud(start, end, lname, lscore, clock, rscore, rname):
+        """Draw the spectator top bar at real HUD geometry (see detect.py):
+        tiny centered clock, score slots at x~0.462/0.538, name tags at
+        x~0.235/0.765."""
         common = f"enable='between(t,{start},{end})'"
-        box = f"drawbox=x=0:y=0:w=iw:h=56:color=0x121216:t=fill:{common}"
-        # ':' is an option separator inside drawtext, escape it in the clock
-        txt = (
-            f"drawtext=fontfile={font}:text='{text.replace(':', chr(92) + ':')}':"
-            f"fontsize=26:fontcolor=white:x=(w-text_w)/2:y=14:{common}"
+        box = f"drawbox=x=iw*0.18:y=0:w=iw*0.64:h=40:color=0x121216:t=fill:{common}"
+
+        def txt(text, cx, y, size):
+            # ':' is an option separator inside drawtext, escape it
+            esc = text.replace(":", chr(92) + ":")
+            return (
+                f"drawtext=fontfile={font}:text='{esc}':fontsize={size}:"
+                f"fontcolor=white:x=w*{cx}-text_w/2:y={y}:{common}"
+            )
+
+        return ",".join(
+            [
+                box,
+                txt(clock, 0.500, 13, 15),
+                txt(lscore, 0.462, 8, 20),
+                txt(rscore, 0.538, 8, 20),
+                txt(lname, 0.235, 10, 18),
+                txt(rname, 0.765, 10, 18),
+            ]
         )
-        return f"{box},{txt}"
 
     panel = (
         f"drawtext=fontfile={font}:text='BE RIGHT BACK':fontsize=72:fontcolor=white:"
@@ -69,7 +85,7 @@ def test_full_pipeline_on_synthetic_vod(synthetic_vod):
     )
 
     assert len(segs) == 2
-    for seg, (start, end, text) in zip(segs, (GAME1, GAME2)):
+    for seg, (start, end, *_rest) in zip(segs, (GAME1, GAME2)):
         assert abs(seg.start - start) <= 4, f"start {seg.start} vs expected {start}"
         assert abs(seg.end - end) <= 4, f"end {seg.end} vs expected {end}"
     assert "LIQUID" in segs[0].left_team

@@ -19,17 +19,19 @@ Game 2  1:18:05 - 1:51:33  (0:33:28)  LIQUID vs SPIRIT
    is downloaded up front.
 2. `ffmpeg` grabs single frames from the stream every 45 s (seeking over HTTP,
    so each probe fetches only a few hundred KB).
-3. Each frame is classified **in-game / not in-game** by OCRing the center of
-   the top HUD strip with `tesseract`: during a game the spectator HUD always
-   shows `TEAM  score  clock  score  TEAM` there. A frame counts as in-game
-   when a game clock (`mm:ss`, including the negative pre-horn clock) is found
-   flanked by kill-score digits.
+3. Each frame is classified **in-game / not in-game** by OCRing the spectator
+   HUD top bar with `tesseract`: during a game it shows the tiny game clock
+   (`mm:ss`, including the negative pre-horn clock) dead-center with the two
+   kill scores in fixed slots next to it. The clock and score boxes are
+   cropped and read individually — tuned against real tournament footage.
 4. Consecutive in-game samples are grouped into games; short gaps (pauses,
    quick replays) are merged, short blips (highlight replays on the analyst
    desk) are dropped, and the exact start/end of each game is refined by
    binary-searching frames down to ~5 s.
-5. Team names are read from the same HUD strip across several frames per game
-   and picked by majority vote.
+5. Team names are read from the HUD's team slots across several frames per
+   game and picked by majority vote. Note that most tournament HUDs show team
+   **logos**, not names — games are then labeled `Game 1`, `Game 2`, ...
+   without team names.
 
 A typical 8-hour VOD needs ~700 frame probes and finishes in a few minutes.
 
@@ -101,8 +103,10 @@ docker run --rm dota2vod https://www.youtube.com/live/70oVjpTnXzM --format json
 - Game starts are detected at the first in-game frame (pre-horn clock), not at
   the start of the draft. If you want drafts included, subtract ~3 min from the
   start or open the link a bit early.
-- Team names come from OCR of the HUD tag (e.g. `LIQUID`, `TSPIRIT`) — they are
-  what the broadcast shows, not canonical team names.
+- Team names are only available when the HUD shows them as text (teams without
+  a configured logo). Pro-tournament HUDs show logos, so most games come back
+  without names — the timestamps are unaffected. When names are read, they are
+  what the broadcast shows (e.g. `LIQUID`), not canonical team names.
 - Non-standard tournament HUDs that hide the kill score next to the clock need
   `--lenient`.
 - YouTube sometimes challenges requests from cloud/datacenter IPs; pass

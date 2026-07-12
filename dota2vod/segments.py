@@ -19,6 +19,8 @@ class Segment:
         return self.end - self.start
 
     def label(self) -> str:
+        if self.left_team == "Unknown" and self.right_team == "Unknown":
+            return ""
         return f"{self.left_team} vs {self.right_team}"
 
 
@@ -96,10 +98,21 @@ def refine_boundary(
 def pick_team_names(
     votes: list[tuple[str, str]], fallback: str = "Unknown"
 ) -> tuple[str, str]:
-    """Choose the most common non-empty OCR reading for each side."""
+    """Choose the majority OCR reading for each side.
+
+    Most tournament HUDs show team logos, not names; OCRing the logo slot then
+    yields sporadic junk ('RE', 'THE', ...). A real text tag reads the same on
+    nearly every frame, so demand the winner appears in most votes (and at
+    least twice) before trusting it.
+    """
 
     def best(names: list[str]) -> str:
         counts = Counter(n for n in names if n)
-        return counts.most_common(1)[0][0] if counts else fallback
+        if not counts:
+            return fallback
+        name, count = counts.most_common(1)[0]
+        if count < 2 or count * 2 < len(names):
+            return fallback
+        return name
 
     return best([v[0] for v in votes]), best([v[1] for v in votes])
