@@ -111,7 +111,8 @@ def pick_team_names(
         if not counts:
             return fallback
         name, count = counts.most_common(1)[0]
-        if count < 2 or count * 2 < len(names):
+        # Require at least 2 votes and 25% of votes (was 50%)
+        if count < 2 or count * 4 < len(names):
             return fallback
         return name
 

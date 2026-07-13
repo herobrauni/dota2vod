@@ -42,6 +42,8 @@ CLOCK_BOX = (0.480, 0.520, 0.015, 0.040)
 SCORE_BOXES = ((0.450, 0.4745, 0.010, 0.038), (0.5255, 0.550, 0.010, 0.038))
 # Logo / team-tag slots just outside the hero portraits.
 NAME_BOXES = ((0.185, 0.285, 0.0, 0.05), (0.715, 0.815, 0.0, 0.05))
+# Player list area on the left side where team tags appear (e.g., "XG. PlayerName")
+PLAYER_LIST_BOX = (0.0, 0.15, 0.08, 0.35)
 
 OCR_SCALE = 4
 MIN_CLOCK_CONF = 40.0
@@ -58,6 +60,22 @@ SCORE_PASSES = (("bin170", 7), ("auto", 7), ("bin170", 10), ("auto", 10))
 
 # Tokens that show up around the top bar but are never team names.
 JUNK_TOKENS = {"VS", "V", "AM", "PM", "DAY", "NIGHT"}
+
+# Map team tags to full team names (common abbreviations)
+# These are extracted from player list prefixes like "XG. PlayerName"
+TEAM_TAG_MAP = {
+    "XG": "Xtreme Gaming",
+    "TL": "Team Liquid",
+    "SPIRIT": "Team Spirit",
+    "NAVI": "NAVI",
+    "GG": "Gaimin Gladiators",
+    "FC": "Team Falcons",
+    "LGD": "LGD Gaming",
+    "TUNDRA": "Tundra",
+    "BB": "Team Bold",
+    "SR": "Sandrock",
+    "AZ": "Azure",
+}
 
 
 @dataclass
@@ -190,6 +208,27 @@ def _read_team_name(img: Image.Image, box: tuple[float, float, float, float]) ->
     return " ".join(parts)
 
 
+def _read_team_tag_from_players(img: Image.Image) -> str:
+    """Extract team tag from player list (e.g., 'XG. PlayerName' -> 'XG')."""
+    crop = crop_box(img, PLAYER_LIST_BOX)
+    # Scale up more aggressively for small text
+    g = crop.convert("L")
+    g = g.resize((g.width * 6, g.height * 6), Image.LANCZOS)
+    g = ImageOps.autocontrast(g)
+
+    # Try multiple PSM modes to catch the list format
+    for psm in (6, 3, 4):  # 6=uniform block, 3=column, 4=vertical line
+        for w in _ocr_words(g, psm=psm):
+            text = w.text.strip()
+            # Look for patterns like "XG." or "XG_" at start of text
+            match = re.match(r"^([A-Z]{2,5})[\._]", text)
+            if match and w.conf >= 30:  # Lower threshold for scaled image
+                tag = match.group(1)
+                # Map to full team name if known
+                return TEAM_TAG_MAP.get(tag.upper(), tag.upper())
+    return ""
+
+
 def classify_frame(img: Image.Image, lenient: bool = False) -> FrameClass:
     """Decide whether the Dota in-game HUD is on screen and read the team names."""
     clock, words = _read_clock(img)
@@ -199,10 +238,16 @@ def classify_frame(img: Image.Image, lenient: bool = False) -> FrameClass:
     has_score = _read_score(img, SCORE_BOXES[0]) or _read_score(img, SCORE_BOXES[1])
     if not (has_score or lenient):
         return FrameClass(in_game=False, clock=clock, words=words)
+
+    # Try to get team names from player list (more reliable than top bar logos)
+    player_tag = _read_team_tag_from_players(img)
+    left_team = player_tag if player_tag else _read_team_name(img, NAME_BOXES[0])
+    right_team = _read_team_name(img, NAME_BOXES[1])
+
     return FrameClass(
         in_game=True,
         clock=clock,
-        left_team=_read_team_name(img, NAME_BOXES[0]),
-        right_team=_read_team_name(img, NAME_BOXES[1]),
+        left_team=left_team,
+        right_team=right_team,
         words=words,
     )

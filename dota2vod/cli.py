@@ -53,6 +53,42 @@ class Scanner:
                 print(f"  {hms(t)} {mark}{extra}", file=sys.stderr)
         return [(t, fc.in_game) for t, fc in zip(times, results)]
 
+    def fast_coarse_scan(self, start: float, end: float, coarse_step: float = 600.0) -> list[tuple[float, bool]]:
+        """Fast first pass with large intervals (default 10 min = 600s)."""
+        return self.coarse_scan(start, end, coarse_step)
+
+    def refine_game_boundaries(self, segs: list[Segment], fine_step: float = 30.0) -> list[Segment]:
+        """For each detected game segment, refine its start/end boundaries using finer sampling."""
+        refined = []
+        for seg in segs:
+            # Find exact start: binary search backwards from seg.start
+            # Look back enough to catch the pre-game (draft, horn)
+            lo = max(0, seg.start - fine_step * 4)
+            hi = seg.start
+            while hi - lo > 5:  # 5 second precision
+                mid = (lo + hi) / 2
+                if self.classify_at(mid).in_game:
+                    hi = mid
+                else:
+                    lo = mid
+            seg.start = hi
+
+            # Find exact end: binary search forwards from seg.end
+            lo = seg.end
+            hi = min(self.source.duration, seg.end + fine_step * 4)
+            while hi - lo > 5:
+                mid = (lo + hi) / 2
+                if self.classify_at(mid).in_game:
+                    lo = mid
+                else:
+                    hi = mid
+            seg.end = lo
+
+            # Verify minimum duration (20 min = 1200s)
+            if seg.duration >= 1200:
+                refined.append(seg)
+        return refined
+
     def refine(self, segs: list[Segment], step: float, precision: float) -> None:
         for seg in segs:
             seg.start = segments.refine_boundary(
@@ -70,7 +106,7 @@ class Scanner:
                 precision=precision,
             )
 
-    def name_teams(self, seg: Segment, n_samples: int = 6) -> None:
+    def name_teams(self, seg: Segment, n_samples: int = 12) -> None:
         votes: list[tuple[str, str]] = []
         # Reuse anything already classified inside the segment.
         for t, fc in self._cache.items():
@@ -84,6 +120,33 @@ class Scanner:
                 if fc.in_game:
                     votes.append((fc.left_team, fc.right_team))
         seg.left_team, seg.right_team = segments.pick_team_names(votes)
+
+
+def fast_scan(
+    source: Source,
+    start: float = 0.0,
+    end: float | None = None,
+    coarse_step: float = 600.0,   # 10 minutes
+    fine_step: float = 30.0,      # 30 seconds for refinement
+    min_game: float = 1200.0,     # 20 minutes minimum
+    lenient: bool = False,
+    workers: int = 8,
+    verbose: bool = False,
+) -> list[Segment]:
+    """Fast two-pass scan: coarse detection at 10-min intervals, then refine boundaries."""
+    end = min(end, source.duration) if end else source.duration
+    scanner = Scanner(source, lenient=lenient, workers=workers, verbose=verbose)
+
+    print(f"Fast scan: checking every {hms(coarse_step)}...", file=sys.stderr)
+    samples = scanner.fast_coarse_scan(start, end, coarse_step)
+    segs = segments.group(segments.smooth(samples), merge_gap=coarse_step, min_duration=min_game/2)
+
+    print(f"Found {len(segs)} game candidates, refining boundaries...", file=sys.stderr)
+    segs = scanner.refine_game_boundaries(segs, fine_step)
+
+    for seg in segs:
+        scanner.name_teams(seg)
+    return segs
 
 
 def scan(
@@ -176,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workers", type=int, default=8, help="parallel frame fetches (default 8)")
     p.add_argument("--lenient", action="store_true", help="accept a game clock without kill scores next to it")
     p.add_argument("--cookies", help="cookies.txt file passed to yt-dlp (if YouTube asks for sign-in)")
+    p.add_argument("--fast", action="store_true", help="use fast two-pass scan (20-min intervals, ~1 min for 6h VOD)")
     p.add_argument("-v", "--verbose", action="store_true", help="log every sampled frame to stderr")
     args = p.parse_args(argv)
 
@@ -189,18 +253,32 @@ def main(argv: list[str] | None = None) -> int:
         f"Scanning {hms(source.duration)} of video every {args.step:.0f}s ...",
         file=sys.stderr,
     )
-    segs = scan(
-        source,
-        step=args.step,
-        start=args.start,
-        end=args.end,
-        merge_gap=args.merge_gap,
-        min_game=args.min_game,
-        precision=args.precision,
-        lenient=args.lenient,
-        workers=args.workers,
-        verbose=args.verbose,
-    )
+
+    if args.fast:
+        segs = fast_scan(
+            source,
+            start=args.start,
+            end=args.end,
+            coarse_step=600.0,
+            fine_step=30.0,
+            min_game=1200.0,
+            lenient=args.lenient,
+            workers=args.workers,
+            verbose=args.verbose,
+        )
+    else:
+        segs = scan(
+            source,
+            step=args.step,
+            start=args.start,
+            end=args.end,
+            merge_gap=args.merge_gap,
+            min_game=args.min_game,
+            precision=args.precision,
+            lenient=args.lenient,
+            workers=args.workers,
+            verbose=args.verbose,
+        )
     renderer = {"text": render_text, "chapters": render_chapters, "json": render_json}[args.format]
     print(renderer(source, segs))
     return 0
